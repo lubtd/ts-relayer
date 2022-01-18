@@ -278,6 +278,65 @@ export class Link {
     return new Link(endA, endB, logger);
   }
 
+  /**
+   * createConnection will always create a new pair of clients and a Connection between the
+   * two sides
+   *
+   * @param nodeA
+   * @param nodeB
+   */
+  public static async createWithExistingClients(
+    nodeA: IbcClient,
+    nodeB: IbcClient,
+    clientIdA: string,
+    clientIdB: string,
+    logger?: Logger
+  ): Promise<Link> {
+
+    // wait a block to ensure we have proper proofs for creating a connection (this has failed on CI before)
+    await Promise.all([nodeA.waitOneBlock(), nodeB.waitOneBlock()]);
+
+    // connectionInit on nodeA
+    const { connectionId: connIdA } = await nodeA.connOpenInit(
+      clientIdA,
+      clientIdB
+    );
+
+    // connectionTry on nodeB
+    const proof = await prepareConnectionHandshake(
+      nodeA,
+      nodeB,
+      clientIdA,
+      clientIdB,
+      connIdA
+    );
+    const { connectionId: connIdB } = await nodeB.connOpenTry(clientIdB, proof);
+
+    // connectionAck on nodeA
+    const proofAck = await prepareConnectionHandshake(
+      nodeB,
+      nodeA,
+      clientIdB,
+      clientIdA,
+      connIdB
+    );
+    await nodeA.connOpenAck(connIdA, proofAck);
+
+    // connectionConfirm on dest
+    const proofConfirm = await prepareConnectionHandshake(
+      nodeA,
+      nodeB,
+      clientIdA,
+      clientIdB,
+      connIdA
+    );
+    await nodeB.connOpenConfirm(connIdB, proofConfirm);
+
+    const endA = new Endpoint(nodeA, clientIdA, connIdA);
+    const endB = new Endpoint(nodeB, clientIdB, connIdB);
+    return new Link(endA, endB, logger);
+  }
+
   // you can use this if you already have the info out of bounds
   // FIXME: check the validity of that data?
   public constructor(endA: Endpoint, endB: Endpoint, logger?: Logger) {
